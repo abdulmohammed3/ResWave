@@ -1,6 +1,5 @@
 # ResumeWave 2.0
 
-[![Node.js CI](https://github.com/yourusername/resumewave/workflows/Node.js%20CI/badge.svg)](https://github.com/yourusername/resumewave/actions)
 [![TypeScript](https://badges.frapsoft.com/typescript/code/typescript.svg?v=101)](https://github.com/microsoft/TypeScript)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://makeapullrequest.com)
