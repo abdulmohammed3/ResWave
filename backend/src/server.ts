@@ -9,7 +9,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { metricsTracker } from './utils/metrics';
 import { withTimeout, withRetry, processWithConcurrencyLimit, calculateTimeout } from './utils/timeouts';
 import { splitContent, extractTextContent, formatPrompt } from './utils/content';
-import { OptimizationError } from './utils/errors';
+import { OptimizationError, OllamaError, ErrorTypes } from './utils/errors';
 import storageEngine from './storage';
 
 const app = express();
@@ -68,6 +68,7 @@ app.use(cors());
 app.use(express.json());
 
 // Initialize Ollama client
+console.log('[Server] Initializing Ollama client with host:', OLLAMA.HOST);
 const ollama = new Ollama({ host: OLLAMA.HOST });
 
 // Routes
@@ -84,52 +85,69 @@ app.post('/api/optimize', uploadMiddleware, async (req, res, next: NextFunction)
   const requestId = req.file?.requestId || Date.now().toString();
   let retryCount = 0;
 
+  console.log(`[Optimize ${requestId}] Starting optimization process`);
+
   try {
     metricsTracker.incrementTotal();
 
     if (!req.file?.path || !req.file?.mimetype) {
+      console.error(`[Optimize ${requestId}] Missing file or mimetype`);
       throw new OptimizationError('File processing failed');
     }
 
-    // Extract text content from file
+    console.log(`[Optimize ${requestId}] Attempting text extraction from: ${req.file.path}`);
     const text = await extractTextContent(req.file.path);
+    console.log(`[Optimize ${requestId}] Successfully extracted ${text.length} characters`);
     
     // Process content in chunks
     const contentChunks = text.length > 2000 ? splitContent(text) : [text];
     const totalChunks = contentChunks.length;
+    console.log(`[Optimize ${requestId}] Split content into ${totalChunks} chunks`);
+    
     let chunksProcessed = 0;
 
     // Process each chunk with retries and timeouts
     const processChunk = async (chunk: string) => {
       const prompt = formatPrompt(PROMPT_TEMPLATES.RESUME_OPTIMIZATION, { content: chunk });
+      const isFirstChunk = chunksProcessed === 0;
       
       try {
+        console.log(`[Optimize ${requestId}] Processing chunk ${chunksProcessed + 1}/${totalChunks}`);
         const response = await withRetry(async () => {
+          console.log(`[Optimize ${requestId}] Sending request to Ollama for chunk ${chunksProcessed + 1}`);
           return await withTimeout(
             ollama.generate({
               model: OLLAMA.DEFAULT_MODEL,
-              prompt
+              prompt,
+              options: {
+                num_predict: OLLAMA.MAX_TOKENS_PER_REQUEST
+              }
             }),
-            calculateTimeout(chunk.length)
+            calculateTimeout(chunk.length, isFirstChunk)
           );
         });
         
         chunksProcessed++;
+        console.log(`[Optimize ${requestId}] Chunk ${chunksProcessed}/${totalChunks} processed successfully`);
         return response.response;
       } catch (error) {
         retryCount++;
+        console.error(`[Optimize ${requestId}] Error processing chunk:`, error);
         throw error;
       }
     };
 
     // Process chunks sequentially
+    console.log(`[Optimize ${requestId}] Starting sequential chunk processing`);
     const results = await processWithConcurrencyLimit(contentChunks, processChunk);
     const optimizedContent = results.join('\n\n');
+    console.log(`[Optimize ${requestId}] All chunks processed successfully`);
 
     // Update metrics and send response
     const processingTime = Date.now() - startTime;
     metricsTracker.recordSuccess(processingTime);
 
+    console.log(`[Optimize ${requestId}] Optimization completed in ${processingTime}ms`);
     res.json({
       optimizedContent,
       metadata: {
@@ -140,10 +158,12 @@ app.post('/api/optimize', uploadMiddleware, async (req, res, next: NextFunction)
       }
     });
   } catch (error) {
+    console.error(`[Optimize ${requestId}] Process failed:`, error);
     next(error);
   } finally {
     // Cleanup uploaded file
     if (req.file?.path) {
+      console.log(`[Optimize ${requestId}] Cleaning up uploaded file`);
       await storageEngine.deleteFile(req.file.path);
     }
   }
@@ -162,10 +182,16 @@ app.post('/api/generate', async (req, res, next: NextFunction) => {
     }
 
     const prompt = formatPrompt(PROMPT_TEMPLATES.DETAILED_OPTIMIZATION, { content: text });
-    const timeout = calculateTimeout(text.length);
+    const timeout = calculateTimeout(text.length, true);
     
     const response = await withTimeout(
-      ollama.generate({ model, prompt }),
+      ollama.generate({ 
+        model, 
+        prompt,
+        options: {
+          num_predict: OLLAMA.MAX_TOKENS_PER_REQUEST
+        }
+      }),
       timeout
     );
 

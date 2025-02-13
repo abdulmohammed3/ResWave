@@ -1,9 +1,20 @@
-import { UploadedFile } from '../middleware/upload';
+import { Express } from 'express-serve-static-core';
+import { Multer } from 'multer';
 
-declare global {
-  namespace Express {
-    interface Request {
-      file?: UploadedFile;
+declare module 'express-serve-static-core' {
+  interface Request {
+    file?: Express.Multer.File & {
+      requestId?: string;
+    };
+  }
+}
+
+declare module 'multer' {
+  namespace Multer {
+    interface File {
+      requestId?: string;
     }
   }
 }
+
+export {};

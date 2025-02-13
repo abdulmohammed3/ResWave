@@ -1,9 +1,18 @@
 import { CHUNK } from '../config';
+import * as fs from 'fs/promises';
+import { OptimizationError } from './errors';
+let mammoth: any;
+
+try {
+  mammoth = require('mammoth');
+  console.log('[Mammoth] Successfully loaded mammoth module');
+} catch (error) {
+  console.error('[Mammoth] Failed to load mammoth module:', error);
+  throw new Error('Failed to initialize document processing module');
+}
 
 /**
  * Splits content into manageable chunks while preserving context
- * @param text Content to split into chunks
- * @returns Array of content chunks
  */
 export function splitContent(text: string): string[] {
   const chunks: string[] = [];
@@ -53,8 +62,6 @@ export function splitContent(text: string): string[] {
 
 /**
  * Formats prompt with variables
- * @param template Prompt template string with ${var} placeholders
- * @param variables Object containing variable values
  */
 export function formatPrompt(template: string, variables: { [key: string]: string | undefined }): string {
   return template.replace(/\${(\w+)}/g, (_, key) => variables[key] || '');
@@ -62,11 +69,14 @@ export function formatPrompt(template: string, variables: { [key: string]: strin
 
 /**
  * Validates file type based on mimetype and extension
- * @param mimetype MIME type of the file
- * @param filename Filename to check extension
- * @returns boolean indicating if file type is allowed
  */
 export function isValidFileType(mimetype: string, filename: string): boolean {
+  console.log(`[FileValidation] Checking file type:`, {
+    mimetype,
+    filename,
+    extension: filename.toLowerCase().slice(filename.lastIndexOf('.'))
+  });
+  
   if (mimetype === 'application/octet-stream') {
     const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'));
     return ['.docx', '.txt'].includes(ext);
@@ -79,14 +89,95 @@ export function isValidFileType(mimetype: string, filename: string): boolean {
 }
 
 /**
+ * Processes a text file
+ */
+async function processTextFile(filepath: string): Promise<string> {
+  console.log(`[ContentExtraction] Processing text file:`, filepath);
+  const content = await fs.readFile(filepath, 'utf8');
+  console.log(`[ContentExtraction] Text file processed, ${content.length} characters`);
+  return content;
+}
+
+/**
+ * Processes a DOCX file
+ */
+async function processDocxFile(filepath: string): Promise<string> {
+  console.log(`[ContentExtraction] Processing DOCX file:`, filepath);
+  
+  if (!mammoth) {
+    console.error('[ContentExtraction] Mammoth module not initialized');
+    throw new OptimizationError('Document processing module not available', {
+      stage: 'content_extraction',
+      processingStatus: 'module_unavailable',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  try {
+    console.log(`[ContentExtraction] Starting mammoth extraction for:`, filepath);
+    const result = await mammoth.extractRawText({ path: filepath });
+    console.log(`[ContentExtraction] Raw mammoth result:`, result);
+    
+    if (!result || typeof result.value !== 'string') {
+      console.error(`[ContentExtraction] Invalid mammoth result:`, result);
+      throw new Error('Invalid document conversion result');
+    }
+    
+    console.log(`[ContentExtraction] DOCX processed successfully, ${result.value.length} characters`);
+    if (result.messages && result.messages.length > 0) {
+      console.log(`[ContentExtraction] Conversion messages:`, result.messages);
+    }
+    
+    return result.value;
+  } catch (error) {
+    console.error(`[ContentExtraction] DOCX processing error:`, error);
+    throw new OptimizationError('Failed to process DOCX file', {
+      stage: 'content_extraction',
+      processingStatus: 'docx_conversion_failed',
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+
+/**
  * Extracts text content from a file
- * @param filepath Path to the file
- * @param mimetype MIME type of the file
  */
 export async function extractTextContent(filepath: string): Promise<string> {
-  const fs = require('fs').promises;
-  const mammoth = require('mammoth');
-  // Read file content 
-  const result = await mammoth.extractRawText({ path: filepath });
-  return result.value;
+  console.log(`[ContentExtraction] Starting extraction for:`, filepath);
+  
+  try {
+    // Verify file exists and is readable
+    const stats = await fs.stat(filepath);
+    console.log(`[ContentExtraction] File stats:`, {
+      size: stats.size,
+      created: stats.birthtime,
+      modified: stats.mtime
+    });
+
+    // Process based on file type
+    const isDocx = filepath.toLowerCase().endsWith('.docx');
+    const content = isDocx 
+      ? await processDocxFile(filepath)
+      : await processTextFile(filepath);
+      
+    if (!content || content.length === 0) {
+      throw new OptimizationError('Extracted content is empty', {
+        stage: 'content_extraction',
+        processingStatus: 'empty_content',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    return content;
+  } catch (error) {
+    console.error(`[ContentExtraction] Extraction failed:`, error);
+    if (error instanceof OptimizationError) {
+      throw error;
+    }
+    throw new OptimizationError('Failed to extract file content', {
+      stage: 'content_extraction',
+      processingStatus: 'extraction_failed',
+      timestamp: new Date().toISOString()
+    });
+  }
 }

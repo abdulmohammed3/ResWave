@@ -1,167 +1,111 @@
 import { Request, Response, NextFunction } from 'express';
-import busboy from 'busboy';
-import { FileMetadata } from '../storage';
-import storageEngine from '../storage';
-import { FILE, TIMEOUTS } from '../config';
+import multer from 'multer';
 import { OptimizationError } from '../utils/errors';
 import { isValidFileType } from '../utils/content';
+import storage from '../storage';
 
-export interface UploadedFile extends FileMetadata {
-  requestId: string;
-}
+// Custom file filter
+const fileFilter = (
+  req: Express.Request,
+  file: Express.Multer.File,
+  cb: multer.FileFilterCallback
+) => {
+  console.log(`[Request ${Date.now()}] Receiving file:`, {
+    fieldname: file.fieldname,
+    filename: file.originalname,
+    encoding: file.encoding,
+    mimeType: file.mimetype
+  });
 
-export async function handleFileUpload(
-  req: Request,
-  requestId: string
-): Promise<UploadedFile> {
-  // Validate content type
-  const contentType = req.headers['content-type'];
-  if (!contentType?.includes('multipart/form-data')) {
-    throw new OptimizationError('Content-Type must be multipart/form-data', {
-      stage: 'content_type_validation',
-      processingStatus: 'invalid_content_type',
+  if (!file.originalname || !file.mimetype) {
+    return cb(new OptimizationError('Invalid file upload', {
+      stage: 'file_validation',
+      processingStatus: 'invalid_file',
       timestamp: new Date().toISOString()
-    });
+    }));
   }
 
-  return new Promise((resolve, reject) => {
-    let hasFile = false;
-    let fileMetadata: FileMetadata | undefined;
-    let fileStreamEnded = false;
-    let fileStreamPromise: Promise<void>;
+  if (!isValidFileType(file.mimetype, file.originalname)) {
+    return cb(new OptimizationError('Invalid file type', {
+      stage: 'file_validation',
+      processingStatus: 'invalid_type',
+      timestamp: new Date().toISOString()
+    }));
+  }
 
-    const bb = busboy({
-      headers: req.headers,
-      limits: {
-        files: 1,
-        fileSize: FILE.MAX_SIZE
-      }
-    });
+  cb(null, true);
+};
 
-    bb.on('file', async (fieldname, file, info) => {
-      console.log(`[Request ${requestId}] Receiving file:`, {
-        fieldname,
-        filename: info.filename,
-        encoding: info.encoding,
-        mimeType: info.mimeType
-      });
+// Custom storage engine using our storage module
+const storageEngine = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, storage.getUploadPath());
+  },
+  filename: (_req, file, cb) => {
+    const timestamp = Date.now();
+    const filename = `${timestamp}-${file.originalname}`;
+    cb(null, filename);
+  }
+});
 
-      // Set up file stream completion promise
-      fileStreamPromise = new Promise<void>((resolveStream, rejectStream) => {
-        file.on('end', () => {
-          fileStreamEnded = true;
-          resolveStream();
-        });
-        file.on('error', (error) => {
-          console.error(`[Request ${requestId}] File stream error:`, error);
-          rejectStream(error);
-        });
-      });
+// Configure multer
+const upload = multer({
+  storage: storageEngine,
+  fileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 1 // Only allow one file at a time
+  }
+});
 
-      try {
-        hasFile = true;
-        
-        if (!isValidFileType(info.mimeType, info.filename)) {
-          throw new OptimizationError('Invalid file type. Only DOCX and TXT files are allowed.', {
-            stage: 'file_validation',
-            hasFile: true,
-            fileReceived: true,
-            processingStatus: 'failed_validation',
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        // Use Promise.race to apply timeout to file upload
-        fileMetadata = await Promise.race([
-          storageEngine.saveFile(file, {
-            filename: info.filename,
-            mimetype: info.mimeType
-          }),
-          new Promise<never>((_, rejectTimeout) => {
-            setTimeout(() => rejectTimeout(new Error('File upload timed out')), TIMEOUTS.UPLOAD);
-          })
-        ]);
-
-        // Wait for the file stream to complete
-        await fileStreamPromise;
-        
-        if (!fileStreamEnded) {
-          throw new OptimizationError('File stream ended prematurely', {
-            stage: 'file_upload',
-            hasFile: true,
-            fileReceived: true,
-            processingStatus: 'stream_incomplete',
-            timestamp: new Date().toISOString()
-          });
-        }
-
-      } catch (error) {
-        // Clean up partial file if it exists
-        if (fileMetadata?.path) {
-          try {
-            await storageEngine.deleteFile(fileMetadata.path);
-          } catch (cleanupError) {
-            console.error(`[Request ${requestId}] Failed to cleanup partial file:`, cleanupError);
-          }
-        }
-        reject(error);
-      }
-    });
-
-    bb.on('finish', () => {
-      try {
-        if (!hasFile) {
-          throw new OptimizationError('No file was uploaded in the request', {
-            stage: 'file_validation',
-            hasFile: false,
-            processingStatus: 'no_file',
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        if (!fileMetadata || !fileMetadata.path || !fileMetadata.filename) {
-          throw new OptimizationError('File upload stream completed but processing failed', {
-            stage: 'file_processing',
-            hasFile: true,
-            fileReceived: true,
-            processingStatus: 'incomplete_metadata',
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        resolve({
-          ...fileMetadata,
-          requestId
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-
-    bb.on('error', reject);
-    req.pipe(bb);
-  });
-}
-
-export const uploadMiddleware = async (
+// Middleware to handle file uploads
+export const uploadMiddleware = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  const requestId = Date.now().toString();
-  
-  try {
-    const file = await handleFileUpload(req, requestId);
-    req.file = file;
-    next();
-  } catch (error) {
-    if (error instanceof OptimizationError) {
-      res.status(422).json({
-        error: error.message,
-        context: error.context
-      });
-      return;
+  const singleUpload = upload.single('resume');
+
+  singleUpload(req, res, (error: any) => {
+    if (error instanceof multer.MulterError) {
+      if (error.code === 'LIMIT_FILE_SIZE') {
+        return next(new OptimizationError('File too large', {
+          stage: 'file_upload',
+          processingStatus: 'file_too_large',
+          timestamp: new Date().toISOString()
+        }));
+      }
+      
+      if (error.code === 'LIMIT_FILE_COUNT') {
+        return next(new OptimizationError('Too many files', {
+          stage: 'file_upload',
+          processingStatus: 'too_many_files',
+          timestamp: new Date().toISOString()
+        }));
+      }
+
+      return next(new OptimizationError(`Upload error: ${error.message}`, {
+        stage: 'file_upload',
+        processingStatus: 'upload_failed',
+        timestamp: new Date().toISOString()
+      }));
     }
-    next(error);
-  }
+
+    if (error) {
+      return next(error);
+    }
+
+    if (!req.file) {
+      return next(new OptimizationError('No file uploaded', {
+        stage: 'file_upload',
+        processingStatus: 'no_file',
+        timestamp: new Date().toISOString()
+      }));
+    }
+
+    // Add request ID for tracking
+    req.file.requestId = Date.now().toString();
+    
+    next();
+  });
 };
