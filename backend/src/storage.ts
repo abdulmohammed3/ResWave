@@ -45,15 +45,36 @@ class Storage {
     let fileSize = 0;
     const writeStream = fs.createWriteStream(filePath);
     
-    await new Promise<void>((resolve, reject) => {
-      file.on('data', (chunk) => {
-        fileSize += chunk.length;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        file.on('data', (chunk) => {
+          fileSize += chunk.length;
+        });
+        
+        file.on('end', () => {
+          writeStream.end();
+        });
+
+        file.on('error', (error) => {
+          writeStream.destroy();
+          reject(error);
+        });
+
+        writeStream.on('finish', () => {
+          resolve();
+        });
+
+        writeStream.on('error', (error) => {
+          reject(error);
+        });
+
+        file.pipe(writeStream);
       });
-      
-      file.pipe(writeStream)
-        .on('finish', resolve)
-        .on('error', reject);
-    });
+    } catch (error) {
+      // Clean up the partially written file on error
+      await this.deleteFile(filePath);
+      throw error;
+    }
     
     return {
       filename,
