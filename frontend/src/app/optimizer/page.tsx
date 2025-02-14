@@ -1,8 +1,6 @@
 'use client';
 
-import { useState } from 'react';
-import { useCallback } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 
 // Dynamically import Monaco Editor with no SSR
@@ -15,7 +13,22 @@ const Editor = dynamic(() => import('@monaco-editor/react'), {
   ),
 });
 
-type AcceptedFile = File & { path?: string };
+interface FileVersion {
+  id: string;
+  filename: string;
+  versionNumber: number;
+  changesDescription: string;
+  uploadedAt: Date;
+  size: number;
+}
+
+interface FileData {
+  versions: FileVersion[];
+  analytics: {
+    totalVersions: number;
+    lastAccessed: Date;
+  };
+}
 
 interface OptimizeResponse {
   optimizedContent: string;
@@ -31,6 +44,8 @@ const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000;
 
 export default function OptimizerPage() {
+  const [files, setFiles] = useState<FileData[]>([]);
+  const [selectedFile, setSelectedFile] = useState<FileVersion | null>(null);
   const [optimizedContent, setOptimizedContent] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,10 +55,29 @@ export default function OptimizerPage() {
     processingTime: number;
   } | null>(null);
 
+  // Fetch existing files on component mount
+  useEffect(() => {
+    const fetchFiles = async () => {
+      try {
+        const response = await fetch('/api/v1/files');
+        if (!response.ok) {
+          throw new Error('Failed to fetch files');
+        }
+        const data = await response.json();
+        setFiles(data);
+      } catch (error) {
+        console.error('Error fetching files:', error);
+        setError('Failed to load existing files');
+      }
+    };
+
+    fetchFiles();
+  }, []);
+
   // Helper function to handle the API request with retries
   const checkServerHealth = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/health');
+      const response = await fetch('/api/v1/health');
       const data = await response.json();
       return data.status === 'healthy';
     } catch {
@@ -51,37 +85,34 @@ export default function OptimizerPage() {
     }
   };
   
-  const optimizeWithRetry = useCallback(async (
-      formData: FormData,
-      retryCount: number = 0,
-    ): Promise<OptimizeResponse> => {
-      try {
-        // Check server health before proceeding
-        const isHealthy = await checkServerHealth();
-        console.log('Server health:', isHealthy);
-        if (!isHealthy) {
-          throw new Error('Optimization service is currently unavailable. Please try again later.');
-        }
-  
-        // Set up timeout controller
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s timeout per request
-        console.log('Optimizing with retry:', retryCount);
-        const response = await fetch('http://localhost:3001/api/optimize', {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal
-        });
-  
-        clearTimeout(timeoutId);
-  
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Unknown error occurred' }));
-          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-        }
-  
-        const data = await response.json();
-        return data;
+  const optimizeWithRetry = async (
+    fileId: string,
+    retryCount: number = 0
+  ): Promise<OptimizeResponse> => {
+    try {
+      const isHealthy = await checkServerHealth();
+      if (!isHealthy) {
+        throw new Error('Optimization service is currently unavailable. Please try again later.');
+      }
+
+      // Set up timeout controller
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s timeout
+      
+      const response = await fetch(`/api/v1/files/${fileId}/optimize`, {
+        method: 'POST',
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error occurred' }));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
     } catch (error) {
       if (retryCount >= MAX_RETRIES) {
         throw new Error(
@@ -94,20 +125,17 @@ export default function OptimizerPage() {
       await new Promise(resolve => setTimeout(resolve, delay));
 
       // Retry with incremented count
-      return optimizeWithRetry(formData, retryCount + 1);
+      return optimizeWithRetry(fileId, retryCount + 1);
     }
-  }, []);
+  };
 
-  const onDrop = useCallback(async (acceptedFiles: AcceptedFile[]) => {
-    if (acceptedFiles.length === 0) return;
-
+  const handleOptimize = async (fileVersion: FileVersion) => {
     setIsLoading(true);
     setError(null);
-    const formData = new FormData();
-    formData.append('resume', acceptedFiles[0]);
+    setSelectedFile(fileVersion);
 
     try {
-      const data = await optimizeWithRetry(formData);
+      const data = await optimizeWithRetry(fileVersion.id);
       setOptimizedContent(data.optimizedContent);
       
       // Update progress information
@@ -136,40 +164,56 @@ export default function OptimizerPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [optimizeWithRetry]);
-
-  const { getRootProps, getInputProps } = useDropzone({
-    accept: {
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
-    },
-    maxFiles: 1,
-    onDrop
-  });
-
-  const dropzoneContent = (
-    <div className="space-y-4">
-      <div className="flex justify-center">
-        <svg className="h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-        </svg>
-      </div>
-      <p className="text-lg text-gray-600 dark:text-gray-300">
-        Drag & drop your resume here, or click to select file
-      </p>
-      <p className="text-sm text-gray-500">Only .docx files are supported</p>
-    </div>
-  );
+  };
 
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold mb-8 text-gray-800 dark:text-white">Resume Optimizer</h1>
         
-        <div className="mb-8">
-          <div {...getRootProps()} className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center cursor-pointer hover:border-blue-500 transition-colors">
-            <input {...getInputProps()} />
-            {dropzoneContent}
-          </div>
+        {/* File List */}
+        <div className="space-y-6 mb-8">
+          {files.map((file, index) => (
+            <div
+              key={index}
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-800 dark:text-white">
+                  {file.versions[0].filename}
+                </h3>
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  {file.analytics.totalVersions} versions
+                </span>
+              </div>
+
+              {/* Version List */}
+              <div className="space-y-3">
+                {file.versions.map((version) => (
+                  <div
+                    key={version.id}
+                    className="flex items-center justify-between py-2 border-b border-gray-200 dark:border-gray-700 last:border-0"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Version {version.versionNumber}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {new Date(version.uploadedAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleOptimize(version)}
+                      className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                      disabled={isLoading}
+                    >
+                      Optimize
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
 
         {error && (
@@ -200,10 +244,12 @@ export default function OptimizerPage() {
           </div>
         )}
 
-        {optimizedContent && (
+        {optimizedContent && selectedFile && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
             <div className="p-4 bg-gray-50 dark:bg-gray-700 border-b dark:border-gray-600">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Optimized Resume</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Optimized Resume: {selectedFile.filename}
+              </h2>
             </div>
             <div className="h-[600px] w-full">
               <Editor

@@ -1,46 +1,16 @@
-export class OptimizationError extends Error {
-  stage: string;
-  processingStatus: string;
-  timestamp: string;
+interface OptimizationErrorMetadata {
+  stage?: string;
+  processingStatus?: string;
+  timestamp?: string;
+  error?: any;
+}
 
-  constructor(message: string, metadata?: {
-    stage?: string;
-    processingStatus?: string;
-    timestamp?: string;
-  }) {
+export class OptimizationError extends Error {
+  metadata: OptimizationErrorMetadata;
+
+  constructor(message: string, metadata: OptimizationErrorMetadata = {}) {
     super(message);
     this.name = 'OptimizationError';
-    this.stage = metadata?.stage || 'unknown';
-    this.processingStatus = metadata?.processingStatus || 'error';
-    this.timestamp = metadata?.timestamp || new Date().toISOString();
+    this.metadata = metadata;
   }
 }
-
-export class OllamaError extends Error {
-  type: string;
-  statusCode?: number;
-
-  constructor(message: string, type: string, statusCode?: number) {
-    super(message);
-    this.name = 'OllamaError';
-    this.type = type;
-    this.statusCode = statusCode;
-  }
-
-  static isModelNotFoundError(error: any): boolean {
-    return error?.message?.includes('model not found') || 
-           error?.message?.includes('failed to load model');
-  }
-
-  static isConnectionError(error: any): boolean {
-    return error?.message?.includes('connection refused') ||
-           error?.message?.includes('network error');
-  }
-}
-
-export const ErrorTypes = {
-  MODEL_NOT_FOUND: 'model_not_found',
-  CONNECTION_ERROR: 'connection_error',
-  TIMEOUT: 'timeout',
-  INVALID_RESPONSE: 'invalid_response'
-} as const;

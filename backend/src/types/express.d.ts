@@ -1,18 +1,21 @@
-import { Express } from 'express-serve-static-core';
-import { Multer } from 'multer';
+import { Version } from './storage';
 
-declare module 'express-serve-static-core' {
-  interface Request {
-    file?: Express.Multer.File & {
-      requestId?: string;
-    };
-  }
-}
+declare global {
+  namespace Express {
+    // Extend the Express Request type
+    interface Request {
+      file?: Multer.File & {
+        requestId?: string;
+        version?: Version;
+      };
+    }
 
-declare module 'multer' {
-  namespace Multer {
-    interface File {
-      requestId?: string;
+    // Extend the Multer File interface
+    namespace Multer {
+      interface File {
+        requestId?: string;
+        version?: Version;
+      }
     }
   }
 }
