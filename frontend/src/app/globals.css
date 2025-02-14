@@ -3,45 +3,96 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-rgb: 255, 255, 255;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-rgb: 0, 0, 0;
-  }
+  --color-ocean: #A8D8EA;
+  --color-sand: #F2D0A4;
+  --color-deep-ocean: #4A90A0;
+  --color-light-sand: #FFF5EA;
+  --foreground-rgb: 51, 51, 51;
+  --background-start: 255, 255, 255;
+  --background-end: 168, 216, 234;
 }
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: rgb(var(--background-rgb));
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--background-start)),
+    rgb(var(--background-end))
+  );
+  background-attachment: fixed;
+  min-height: 100vh;
 }
 
+/* Animated wave effect for transitions */
+.wave-transition {
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.wave-transition::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--color-deep-ocean);
+  transform: scaleX(0);
+  transition: transform 0.3s ease;
+}
+
+.wave-transition:hover::after {
+  transform: scaleX(1);
+}
+
+/* Dropzone styling with coastal theme */
 .dropzone {
-  border: 2px dashed #ccc;
-  border-radius: 4px;
+  border: 2px dashed var(--color-ocean);
+  border-radius: 8px;
   padding: 20px;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.3s ease;
+  transition: all 0.3s ease;
+  background: var(--color-light-sand);
 }
 
 .dropzone:hover {
-  border-color: #0070f3;
+  border-color: var(--color-deep-ocean);
+  background: white;
 }
 
+/* Editor container with themed styling */
 .editor-container {
   min-height: 500px;
-  border: 1px solid #333;
-  border-radius: 4px;
+  border: 1px solid var(--color-ocean);
+  border-radius: 8px;
   overflow: hidden;
+  background: white;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
+/* Loading state with themed colors */
 .loading {
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 200px;
+  color: var(--color-deep-ocean);
+}
+
+/* Responsive text sizes */
+@media (max-width: 640px) {
+  :root {
+    font-size: 14px;
+  }
+}
+
+/* Animation keyframes for wave effect */
+@keyframes wave {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }

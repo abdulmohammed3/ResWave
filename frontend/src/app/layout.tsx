@@ -1,9 +1,13 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Poppins } from 'next/font/google';
 import './globals.css';
 import NavBar from '@/components/NavBar';
 
-const inter = Inter({ subsets: ['latin'] });
+const poppins = Poppins({
+  weight: ['400', '500', '600', '700'],
+  subsets: ['latin'],
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'ResWave - AI Resume Optimizer',
@@ -17,10 +21,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className={poppins.className}>
         <NavBar />
-        <main className="min-h-screen bg-gray-50 dark:bg-gray-900">
-          {children}
+        <main className="container mx-auto px-4 py-8 mt-8 relative z-10">
+          <div className="bg-white/80 backdrop-blur-sm rounded-lg shadow-lg p-6">
+            {children}
+          </div>
         </main>
       </body>
     </html>
