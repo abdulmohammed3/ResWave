@@ -35,10 +35,37 @@ export class EnhancedStorageService {
   public async initialize(): Promise<void> {
     try {
       console.log('[EnhancedStorage] Initializing storage service');
+      
+      // Create base directories
       await mkdir(this.baseDir, { recursive: true });
       await mkdir(this.versionsDir, { recursive: true });
       await mkdir(this.categoriesDir, { recursive: true });
       await mkdir(this.eventsDir, { recursive: true });
+
+      // Validate and fix storage directory structure
+      const dirs = await readdir(this.versionsDir);
+      for (const dir of dirs) {
+        const fullPath = path.join(this.versionsDir, dir);
+        const stats = await stat(fullPath);
+        
+        if (stats.isDirectory()) {
+          try {
+            const files = await readdir(fullPath);
+            const hasVersionFiles = files.some(f => f.endsWith('.json'));
+            
+            if (!hasVersionFiles) {
+              console.warn(`[EnhancedStorage] Empty version directory found: ${dir}, cleaning up`);
+              await fs.promises.rmdir(fullPath);
+            }
+          } catch (err) {
+            console.error(`[EnhancedStorage] Error validating directory ${dir}:`, err);
+          }
+        } else {
+          console.warn(`[EnhancedStorage] Non-directory item found in versions: ${dir}, cleaning up`);
+          await unlink(fullPath);
+        }
+      }
+
       console.log('[EnhancedStorage] Storage service initialized successfully');
     } catch (error) {
       console.error('[EnhancedStorage] Failed to initialize storage service:', error);
@@ -68,6 +95,7 @@ export class EnhancedStorageService {
       // Create version metadata
       const version: Version = {
         id: fileId,
+        userId: metadata.userId,
         filename,
         path: filePath,
         mimetype: metadata.mimetype || 'application/octet-stream',
@@ -124,6 +152,7 @@ export class EnhancedStorageService {
 
       const version: Version = {
         id: uuidv4(),
+        userId: versions[0].userId, // Use the same userId as the parent version
         filename,
         path: filePath,
         mimetype: versions[0].mimetype,
@@ -148,17 +177,45 @@ export class EnhancedStorageService {
   public async listVersions(fileId: string): Promise<Version[]> {
     try {
       const versionsPath = path.join(this.versionsDir, fileId);
-      const files = await readdir(versionsPath);
-      const versions: Version[] = [];
-
-      for (const file of files) {
-        const versionPath = path.join(versionsPath, file);
-        const versionData = JSON.parse(
-          await fs.promises.readFile(versionPath, 'utf-8')
-        );
-        versions.push(versionData);
+      
+      // Check if directory exists
+      try {
+        await fs.promises.access(versionsPath);
+      } catch {
+        console.warn(`[EnhancedStorage] Version directory not found for file ${fileId}`);
+        return [];
       }
 
+      // Read all files in the version directory
+      const files = await readdir(versionsPath);
+      const versionFiles = files.filter(f => f.endsWith('.json'));
+      
+      if (versionFiles.length === 0) {
+        console.warn(`[EnhancedStorage] No version files found for file ${fileId}`);
+        return [];
+      }
+
+      const versions: Version[] = [];
+      for (const file of versionFiles) {
+        try {
+          const versionPath = path.join(versionsPath, file);
+          const content = await fs.promises.readFile(versionPath, 'utf-8');
+          const versionData = JSON.parse(content);
+          
+          // Validate version data
+          if (!versionData.id || !versionData.filename || !versionData.versionNumber) {
+            console.warn(`[EnhancedStorage] Invalid version data in ${file}`);
+            continue;
+          }
+          
+          versions.push(versionData);
+        } catch (err) {
+          console.error(`[EnhancedStorage] Error reading version file ${file}:`, err);
+          continue;
+        }
+      }
+
+      // Sort versions by number in descending order
       return versions.sort((a, b) => b.versionNumber - a.versionNumber);
     } catch (error) {
       console.error('[EnhancedStorage] Failed to list versions:', error);
@@ -246,19 +303,37 @@ export class EnhancedStorageService {
 
   public async getUserFiles(userId: string): Promise<Version[]> {
     try {
-      const files = await readdir(this.baseDir);
+      if (!userId) {
+        console.error('[EnhancedStorage] User ID is required');
+        return [];
+      }
+
+      const versionDirs = await readdir(this.versionsDir);
       const userFiles: Version[] = [];
 
-      for (const file of files) {
-        const filePath = path.join(this.baseDir, file);
-        const stats = await stat(filePath);
-        if (stats.isFile()) {
-          const version = JSON.parse(
-            await fs.promises.readFile(filePath, 'utf-8')
-          );
-          if (version.userId === userId) {
-            userFiles.push(version);
+      for (const versionDir of versionDirs) {
+        try {
+          // Skip non-directory items and hidden files
+          if (versionDir.startsWith('.')) continue;
+          
+          const versionPath = path.join(this.versionsDir, versionDir);
+          const stats = await stat(versionPath);
+          
+          if (!stats.isDirectory()) continue;
+
+          // Get all version files
+          const allVersions = await this.listVersions(versionDir);
+          
+          // Find the latest version that belongs to this user
+          const latestVersion = allVersions.find(v => v.userId === userId);
+          
+          if (latestVersion) {
+            userFiles.push(latestVersion);
           }
+        } catch (err) {
+          console.error(`[EnhancedStorage] Error processing version directory ${versionDir}:`, err);
+          // Continue with next directory
+          continue;
         }
       }
 
@@ -298,6 +373,29 @@ export class EnhancedStorageService {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw error;
       }
+    }
+  }
+
+  public async checkHealth(): Promise<boolean> {
+    try {
+      // Verify all required directories exist and are accessible
+      await Promise.all([
+        mkdir(this.baseDir, { recursive: true }),
+        mkdir(this.versionsDir, { recursive: true }),
+        mkdir(this.categoriesDir, { recursive: true }),
+        mkdir(this.eventsDir, { recursive: true })
+      ]);
+      
+      // Check if we can write and read a test file
+      const testFile = path.join(this.baseDir, '.health-check');
+      await fs.promises.writeFile(testFile, 'health check');
+      await fs.promises.readFile(testFile);
+      await unlink(testFile);
+      
+      return true;
+    } catch (error) {
+      console.error('[EnhancedStorage] Health check failed:', error);
+      return false;
     }
   }
 }

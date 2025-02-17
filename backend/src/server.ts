@@ -1,10 +1,15 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { SERVER, RATE_LIMIT } from './config';
 import { errorHandler } from './middleware/errorHandler';
 import filesRouter from './routes/files';
-import { storage } from './services';
+import paymentsRouter from './routes/payments';
+import { storage, ollama } from './services';
+import { getServiceStatus, ensureOllamaRunning } from './utils/service-recovery';
 
 export async function createServer() {
   const app = express();
@@ -13,7 +18,10 @@ export async function createServer() {
   await storage.initialize();
 
   // Middleware
-  app.use(cors());
+  app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true
+  }));
   app.use(express.json());
   
   // Rate limiting
@@ -26,10 +34,53 @@ export async function createServer() {
 
   // Routes
   app.use('/api/v1/files', filesRouter);
+  app.use('/api/v1/payments', paymentsRouter);
 
   // Health check
-  app.get('/health', (_, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  app.get('/health', async (_, res) => {
+    try {
+      const [serviceStatus, storageStatus] = await Promise.all([
+        getServiceStatus(),
+        storage.checkHealth()
+      ]);
+
+      // If Ollama is not running or unhealthy, try to recover
+      if (!serviceStatus.ollama.healthy) {
+        console.log('Attempting to recover Ollama service...');
+        await ensureOllamaRunning();
+        // Get updated status after recovery attempt
+        serviceStatus.ollama = {
+          ...(await getServiceStatus()).ollama
+        };
+      }
+
+      const status = (serviceStatus.ollama.healthy && storageStatus) ? 'healthy' : 'degraded';
+      
+      res.json({
+        status,
+        services: {
+          ollama: serviceStatus.ollama.status,
+          storage: storageStatus ? 'available' : 'unavailable'
+        },
+        details: {
+          ollama: {
+            running: serviceStatus.ollama.running,
+            healthy: serviceStatus.ollama.healthy
+          }
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Health check failed:', error);
+      res.status(500).json({
+        status: 'error',
+        services: {
+          ollama: 'error',
+          storage: 'error'
+        },
+        timestamp: new Date().toISOString()
+      });
+    }
   });
 
   // Error handling

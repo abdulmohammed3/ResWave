@@ -8,6 +8,33 @@ export class OllamaService {
     this.baseUrl = baseUrl;
   }
 
+  async checkHealth(): Promise<boolean> {
+    try {
+      // First try to check if Ollama server is responding
+      const response = await axios.get(`${this.baseUrl}/api/health`, {
+        timeout: 5000 // 5 second timeout
+      });
+
+      if (response.status !== 200) {
+        return false;
+      }
+
+      // Now verify if the model we need is available
+      const modelResponse = await axios.get(`${this.baseUrl}/api/show`, {
+        params: { name: 'llama2' },
+        timeout: 5000
+      });
+
+      return modelResponse.status === 200 && !!modelResponse.data;
+    } catch (error) {
+      console.error('Ollama health check failed:', {
+        message: error instanceof Error ? error.message : String(error),
+        baseUrl: this.baseUrl
+      });
+      return false;
+    }
+  }
+
   async optimizeResume(content: string): Promise<string> {
     try {
       const response = await axios.post(`${this.baseUrl}/api/generate`, {

@@ -14,7 +14,6 @@ export default function NavBar() {
 
   const navItems = [
     { name: 'Home', path: '/' },
-    { name: 'Resume Manager', path: '/files' },
     { name: 'Doc Optimizer', path: '/optimizer' },
     { name: 'Pricing', path: '/pricing' },
   ];
@@ -25,12 +24,14 @@ export default function NavBar() {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <div className="flex items-center">
+          <div className='flex items-center space-x-2'>
           <SignedOut>
               <SignInButton />
             </SignedOut>
             <SignedIn>
               <UserButton />
             </SignedIn>
+          </div>
             <Link href="/" className="text-2xl font-bold text-[#4A90A0] hover:text-gray-800 transition-colors duration-300">
               ResWave
             </Link>

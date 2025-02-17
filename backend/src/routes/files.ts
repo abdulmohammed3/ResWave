@@ -150,6 +150,53 @@ router.post('/:fileId/versions/:versionId/restore', async (req, res, next) => {
 });
 
 /**
+ * Download a file
+ * GET /api/v1/files/:fileId/download
+ */
+router.get('/:fileId/download', async (req, res, next) => {
+  try {
+    const versions = await storage.listVersions(req.params.fileId);
+    if (versions.length === 0) {
+      throw new Error('No versions found for this file');
+    }
+
+    const latestVersion = versions[0];
+    res.download(latestVersion.path, latestVersion.filename);
+  } catch (error) {
+    next(new OptimizationError('Failed to download file', {
+      stage: 'file_download',
+      processingStatus: 'download_failed',
+      timestamp: new Date().toISOString(),
+      error
+    }));
+  }
+});
+
+/**
+ * Download a specific version of a file
+ * GET /api/v1/files/:fileId/versions/:versionId/download
+ */
+router.get('/:fileId/versions/:versionId/download', async (req, res, next) => {
+  try {
+    const versions = await storage.listVersions(req.params.fileId);
+    const version = versions.find(v => v.id === req.params.versionId);
+    
+    if (!version) {
+      throw new Error('Version not found');
+    }
+
+    res.download(version.path, version.filename);
+  } catch (error) {
+    next(new OptimizationError('Failed to download version', {
+      stage: 'version_download',
+      processingStatus: 'download_failed',
+      timestamp: new Date().toISOString(),
+      error
+    }));
+  }
+});
+
+/**
  * Get file analytics
  * GET /api/v1/files/:fileId/analytics
  */

@@ -37,6 +37,7 @@ export interface EnhancedFileMetadata extends FileMetadata {
 
 export interface Version extends StoredFile {
   id: string;
+  userId: string;
   versionNumber: number;
   changesDescription: string;
   parentVersionId?: string;
