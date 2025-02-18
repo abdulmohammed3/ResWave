@@ -37,7 +37,7 @@ export async function createServer() {
   app.use('/api/v1/payments', paymentsRouter);
 
   // Health check
-  app.get('/health', async (_, res) => {
+  app.get('/api/v1/health', async (_, res) => {
     try {
       const [serviceStatus, storageStatus] = await Promise.all([
         getServiceStatus(),
@@ -57,6 +57,7 @@ export async function createServer() {
       const status = (serviceStatus.ollama.healthy && storageStatus) ? 'healthy' : 'degraded';
       
       res.json({
+        success: true,
         status,
         services: {
           ollama: serviceStatus.ollama.status,
@@ -73,7 +74,9 @@ export async function createServer() {
     } catch (error) {
       console.error('Health check failed:', error);
       res.status(500).json({
+        success: false,
         status: 'error',
+        error: error instanceof Error ? error.message : 'Health check failed',
         services: {
           ollama: 'error',
           storage: 'error'

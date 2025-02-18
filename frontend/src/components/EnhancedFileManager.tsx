@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import dynamic from 'next/dynamic';
+import { useAuth } from '@clerk/nextjs';
 import { FileVersion, FileData } from '@/types/files';
 
 // Dynamically import Monaco Editor with no SSR
@@ -38,6 +39,7 @@ export default function EnhancedFileManager({
   showOptimizeButton = true,
   isOptimizing = false
 }: EnhancedFileManagerProps) {
+  const { getToken } = useAuth();
   const [files, setFiles] = useState<FileData[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -46,11 +48,23 @@ export default function EnhancedFileManager({
   const [optimizedContent, setOptimizedContent] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // Helper function to get authentication headers
+  const getAuthHeaders = async () => {
+    const token = await getToken();
+    return {
+      'Authorization': `Bearer ${token}`,
+    };
+  };
+
   // Fetch existing files on component mount
   useEffect(() => {
     const fetchFiles = async () => {
       try {
-        const response = await fetch('/api/v1/files?userId=default-user');
+        const headers = await getAuthHeaders();
+        const response = await fetch('/api/v1/files', {
+          headers
+        });
+
         if (!response.ok) {
           const errorText = await response.text().catch(() => null);
           console.error('API Error Details:', {
@@ -80,15 +94,16 @@ export default function EnhancedFileManager({
     };
 
     fetchFiles();
-  }, []);
+  }, [getToken]);
 
   const handleDownload = async (fileId: string, versionId?: string) => {
     try {
+      const headers = await getAuthHeaders();
       const url = versionId 
         ? `/api/v1/files/${fileId}/versions/${versionId}/download`
         : `/api/v1/files/${fileId}/download`;
       
-      const response = await fetch(url);
+      const response = await fetch(url, { headers });
       
       if (!response.ok) {
         throw new Error(`Download failed: ${response.status} ${response.statusText}`);
@@ -121,12 +136,16 @@ export default function EnhancedFileManager({
     setError(null);
 
     try {
+      const headers = await getAuthHeaders();
       for (const file of acceptedFiles) {
         const formData = new FormData();
         formData.append('resume', file);
         
         const response = await fetch('/api/v1/files', {
           method: 'POST',
+          headers: {
+            ...headers,
+          },
           body: formData,
         });
 
@@ -154,7 +173,7 @@ export default function EnhancedFileManager({
       setIsUploading(false);
       setUploadProgress(0);
     }
-  }, [onFileSelect]);
+  }, [onFileSelect, getToken]);
 
   const handleOptimize = async (version: FileVersion) => {
     if (onOptimize) {

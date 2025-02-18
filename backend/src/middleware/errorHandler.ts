@@ -28,32 +28,36 @@ interface ErrorLogContext {
 }
 
 function createErrorResponse(error: any): ErrorResponse {
-  if (error instanceof OptimizationError) {
-    return {
-      error: 'OptimizationError',
-      message: error.message,
-      details: {
-        stage: error.stage,
-        status: error.processingStatus,
-        timestamp: error.timestamp
-      }
-    };
-  }
+  try {
+    if (error instanceof OptimizationError) {
+      return {
+        error: 'OptimizationError',
+        message: error.message,
+        details: {
+          stage: error.stage,
+          status: error.processingStatus,
+          timestamp: error.timestamp
+        }
+      };
+    }
 
-  if (error instanceof OllamaError) {
-    return {
-      error: 'OllamaError',
-      message: error.message,
-      details: {
-        type: error.type
-      }
-    };
+    if (error instanceof OllamaError) {
+      return {
+        error: 'OllamaError',
+        message: error.message,
+        details: {
+          type: error.type
+        }
+      };
+    }
+  } catch (e) {
+    console.error('Error creating error response:', e);
   }
 
   // Default error response
   return {
-    error: error.name || 'UnknownError',
-    message: error.message || 'An unexpected error occurred'
+    error: error?.name || 'UnknownError',
+    message: error?.message || 'An unexpected error occurred'
   };
 }
 
@@ -63,26 +67,30 @@ function logError(error: any, req: Request): void {
     path: req.path,
     method: req.method,
     error: {
-      name: error.name || 'UnknownError',
-      message: error.message || 'An unexpected error occurred',
-      stack: error.stack
+      name: error?.name || 'UnknownError',
+      message: error?.message || 'An unexpected error occurred',
+      stack: error?.stack
     }
   };
 
-  if (error instanceof OptimizationError) {
-    errorContext.error = {
-      ...errorContext.error,
-      stage: error.stage,
-      status: error.processingStatus
-    };
-  }
+  try {
+    if (error instanceof OptimizationError) {
+      errorContext.error = {
+        ...errorContext.error,
+        stage: error.stage,
+        status: error.processingStatus
+      };
+    }
 
-  if (error instanceof OllamaError) {
-    errorContext.error = {
-      ...errorContext.error,
-      type: error.type,
-      statusCode: error.statusCode
-    };
+    if (error instanceof OllamaError) {
+      errorContext.error = {
+        ...errorContext.error,
+        type: error.type,
+        statusCode: error.statusCode
+      };
+    }
+  } catch (e) {
+    console.error('Error while handling error context:', e);
   }
 
   console.error('[ErrorHandler] Request failed:', errorContext);
@@ -94,28 +102,39 @@ export function errorHandler(
   res: Response,
   next: NextFunction
 ): void {
-  logError(error, req);
+  try {
+    logError(error, req);
+    const errorResponse = createErrorResponse(error);
+    let statusCode = 500;
 
-  const errorResponse = createErrorResponse(error);
-  let statusCode = 500;
-
-  if (error instanceof OptimizationError) {
-    statusCode = 400;
-  } else if (error instanceof OllamaError) {
-    switch (error.type) {
-      case ErrorTypes.MODEL_NOT_FOUND:
-        statusCode = 503;
-        break;
-      case ErrorTypes.CONNECTION_ERROR:
-        statusCode = 503;
-        break;
-      case ErrorTypes.TIMEOUT:
-        statusCode = 504;
-        break;
-      default:
-        statusCode = 500;
+    try {
+      if (error instanceof OptimizationError) {
+        statusCode = 400;
+      } else if (error instanceof OllamaError) {
+        switch (error.type) {
+          case ErrorTypes.MODEL_NOT_FOUND:
+            statusCode = 503;
+            break;
+          case ErrorTypes.CONNECTION_ERROR:
+            statusCode = 503;
+            break;
+          case ErrorTypes.TIMEOUT:
+            statusCode = 504;
+            break;
+          default:
+            statusCode = 500;
+        }
+      }
+    } catch (e) {
+      console.error('Error determining status code:', e);
     }
-  }
 
-  res.status(statusCode).json(errorResponse);
+    res.status(statusCode).json(errorResponse);
+  } catch (e) {
+    console.error('Fatal error in error handler:', e);
+    res.status(500).json({
+      error: 'InternalServerError',
+      message: 'An unexpected error occurred while processing the error'
+    });
+  }
 }
