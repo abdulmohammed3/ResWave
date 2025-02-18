@@ -21,45 +21,11 @@ export default function OptimizerPage() {
   const [error, setError] = useState<string | null>(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
 
- const checkServerHealth = async () => {
-   try {
-     const response = await fetch('/api/v1/health');
-     const data = await response.json();
-     
-     if (data.status === 'error') {
-       throw new Error('Service health check failed');
-     }
-
-     if (data.status === 'degraded') {
-       const issues = [];
-       if (data.services.ollama !== 'available') {
-         issues.push('Optimization service is unavailable');
-       }
-       if (data.services.storage !== 'available') {
-         issues.push('Storage service is unavailable');
-       }
-       if (issues.length > 0) {
-         throw new Error(issues.join('. '));
-       }
-     }
-
-     return data.status === 'healthy';
-   } catch (error) {
-     console.error('Health check failed:', error);
-     return false;
-   }
- };
-
   const optimizeWithRetry = async (
     fileId: string,
     retryCount: number = 0
   ): Promise<OptimizeResponse> => {
     try {
-      const isHealthy = await checkServerHealth();
-      if (!isHealthy) {
-        throw new Error('Optimization service is currently unavailable. Please try again later.');
-      }
-
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s timeout
       

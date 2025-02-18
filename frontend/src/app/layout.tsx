@@ -1,18 +1,13 @@
-import type { Metadata } from 'next';
-import { Poppins } from 'next/font/google';
-import './globals.css';
+import { Inter } from 'next/font/google';
+import { ClerkProvider } from '@clerk/nextjs';
 import NavBar from '@/components/NavBar';
-import { ClerkProvider} from '@clerk/nextjs';
+import './globals.css';
 
-const poppins = Poppins({
-  weight: ['400', '500', '600', '700'],
-  subsets: ['latin'],
-  display: 'swap',
-});
+const inter = Inter({ subsets: ['latin'] });
 
-export const metadata: Metadata = {
+export const metadata = {
   title: 'ResWave - AI Resume Optimizer',
-  description: 'Optimize your resume with AI-powered suggestions',
+  description: 'Optimize your resume with AI-powered suggestions and version control.',
 };
 
 export default function RootLayout({
@@ -21,17 +16,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-  <ClerkProvider>
-    <html lang="en">
-      <body className={poppins.className}>
-        <NavBar />
-        <main className="container mx-auto px-4 py-8 mt-8 relative z-10">
-          <div className="bg-white/80 backdrop-blur-sm rounded-lg shadow-lg p-6">
-            {children}
-          </div>
-        </main>
-      </body>
-    </html>
-  </ClerkProvider>
+    <ClerkProvider>
+      <html lang="en">
+        <body className={inter.className}>
+          <NavBar />
+          <main className="min-h-screen bg-gray-50">{children}</main>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
