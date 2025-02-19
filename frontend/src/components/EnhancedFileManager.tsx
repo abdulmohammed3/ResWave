@@ -49,12 +49,12 @@ export default function EnhancedFileManager({
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Helper function to get authentication headers
-  const getAuthHeaders = async () => {
+  const getAuthHeaders = useCallback(async () => {
     const token = await getToken();
     return {
       'Authorization': `Bearer ${token}`,
     };
-  };
+  }, [getToken]);
 
   // Fetch existing files on component mount
   useEffect(() => {
@@ -94,7 +94,7 @@ export default function EnhancedFileManager({
     };
 
     fetchFiles();
-  }, [getToken]);
+  }, [getAuthHeaders, getToken]);
 
   const handleDownload = async (fileId: string, versionId?: string) => {
     try {
@@ -173,7 +173,7 @@ export default function EnhancedFileManager({
       setIsUploading(false);
       setUploadProgress(0);
     }
-  }, [onFileSelect, getToken]);
+  }, [onFileSelect,getAuthHeaders]);
 
   const handleOptimize = async (version: FileVersion) => {
     if (onOptimize) {

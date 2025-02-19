@@ -1,5 +1,5 @@
-import app from './server';
+import { startServer} from './server';
 
 // This file serves as the entry point
 // The actual server implementation is in server.ts
-export default app;
+export default startServer;

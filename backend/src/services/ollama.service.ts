@@ -4,7 +4,7 @@ import { OptimizationError, OllamaError, ErrorTypes } from '../utils/errors';
 export class OllamaService {
   private readonly baseUrl: string;
 
-  constructor(baseUrl: string = 'http://localhost:11434') {
+  constructor(baseUrl: string = process.env.OLLAMA_BASE_URL || 'http://localhost:11434') {
     this.baseUrl = baseUrl;
   }
 

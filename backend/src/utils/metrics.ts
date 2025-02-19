@@ -1,87 +1,32 @@
-/**
- * Metrics tracking for server monitoring
- */
-
-export interface RequestMetrics {
-  totalRequests: number;
-  successfulRequests: number;
-  failedRequests: number;
-  averageProcessingTime: number;
+interface Metric {
+  name: string;
+  value: number;
+  timestamp: Date;
+  tags?: Record<string, string>;
+  metadata?: any;
 }
 
-export interface ChunkMetrics {
-  retryCount: number;
-  processingTime: number;
-  chunksProcessed: number;
-  totalChunks: number;
-}
+const metricsQueue: Metric[] = [];
 
-class MetricsTracker {
-  private metrics: RequestMetrics = {
-    totalRequests: 0,
-    successfulRequests: 0,
-    failedRequests: 0,
-    averageProcessingTime: 0
+export function collectMetrics(name: string, value: number | object, tags?: Record<string, string>) {
+  const metric: Metric = {
+    name,
+    value: typeof value === 'number' ? value : 0,
+    timestamp: new Date(),
+    tags,
+    metadata: typeof value === 'object' ? value : undefined
   };
+  
+  metricsQueue.push(metric);
+  flushMetricsIfNeeded();
+}
 
-  /**
-   * Increment total request count
-   */
-  incrementTotal(): void {
-    this.metrics.totalRequests++;
-  }
-
-  /**
-   * Record a successful request with processing time
-   * @param processingTime Time taken to process the request in milliseconds
-   */
-  recordSuccess(processingTime: number): void {
-    this.metrics.successfulRequests++;
-    this.updateAverageTime(processingTime);
-  }
-
-  /**
-   * Record a failed request
-   */
-  recordFailure(): void {
-    this.metrics.failedRequests++;
-  }
-
-  /**
-   * Update average processing time
-   * @param processingTime Processing time for the current request
-   */
-  private updateAverageTime(processingTime: number): void {
-    this.metrics.averageProcessingTime = (
-      this.metrics.averageProcessingTime * (this.metrics.successfulRequests - 1) +
-      processingTime
-    ) / this.metrics.successfulRequests;
-  }
-
-  /**
-   * Get current metrics
-   */
-  getMetrics(): RequestMetrics {
-    return { ...this.metrics };
+function flushMetricsIfNeeded() {
+  if (metricsQueue.length >= 100) {
+    console.log('[Metrics] Flushing metrics:', metricsQueue);
+    metricsQueue.length = 0;
   }
 }
 
-// Export singleton instance
-export const metricsTracker = new MetricsTracker();
-
-/**
- * Create metrics for chunk processing
- */
-export function createChunkMetrics(
-  retryCount: number,
-  startTime: number,
-  chunksProcessed: number,
-  totalChunks: number
-): ChunkMetrics {
-  return {
-    retryCount,
-    processingTime: Date.now() - startTime,
-    chunksProcessed,
-    totalChunks
-  };
-}
+// Initialize metrics flushing on interval
+setInterval(flushMetricsIfNeeded, 60000);

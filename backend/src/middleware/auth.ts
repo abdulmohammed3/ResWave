@@ -1,6 +1,5 @@
-import { NextFunction, Request, Response } from 'express';
-import { clerkClient } from '@clerk/clerk-sdk-node';
-import { expressjwt, Request as JWTRequest } from 'express-jwt';
+import { NextFunction, Request, Response, RequestHandler, ErrorRequestHandler } from 'express';
+import { ClerkExpressRequireAuth, AuthObject } from '@clerk/clerk-sdk-node';
 import { OptimizationError } from '../utils/errors';
 import { AuthRequest, ClerkUser } from '../types/auth';
 
@@ -17,50 +16,44 @@ export class AuthenticationError extends OptimizationError {
   }
 }
 
-// Get Clerk secret key from environment
-const secretKey = process.env.CLERK_SECRET_KEY;
-if (!secretKey) {
-  throw new Error('CLERK_SECRET_KEY is not set in environment variables');
-}
-
-// JWT middleware configuration
-const requireAuth = expressjwt({
-  secret: secretKey,
-  algorithms: ['HS256'],
-  requestProperty: 'auth',
-  getToken: (req: Request): string | undefined => {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.split(' ')[0] === 'Bearer') {
-      return authHeader.split(' ')[1];
-    }
-    return undefined;
+// Clerk auth middleware
+const requireAuth: RequestHandler = ClerkExpressRequireAuth({
+  onError: (error: Error) => {
+    throw new AuthenticationError('Authentication required', {
+      originalError: error.message
+    });
   }
 });
 
 // Additional middleware to transform Clerk auth data to our format
-export const validateAuthData = async (
+export const validateAuthData: RequestHandler = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   try {
-    const jwtReq = req as JWTRequest;
-    if (!jwtReq.auth?.sub) {
+    const clerkAuth = (req as any).auth as AuthObject;
+    if (!clerkAuth?.userId) {
       throw new AuthenticationError('Invalid authentication data');
     }
 
-    // Get full user data from Clerk
-    const user = await clerkClient.users.getUser(jwtReq.auth.sub);
-    
+    const token = await clerkAuth.getToken();
+    const claims = token ? JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString()) : {};
+
+    const emailAddresses = (claims.email || []).map((email: string) => ({
+      emailAddress: email,
+      verification: { status: 'verified' as const }
+    }));
+
     // Transform to our AuthRequest format
     (req as AuthRequest).auth = {
-      userId: user.id,
+      userId: clerkAuth.userId,
       user: {
-        id: user.id,
-        emailAddresses: user.emailAddresses,
-        firstName: user.firstName,
-        lastName: user.lastName
-      }
+        id: clerkAuth.userId,
+        emailAddresses,
+        firstName: claims.firstName as string | null,
+        lastName: claims.lastName as string | null
+      } as ClerkUser
     };
 
     next();
@@ -74,24 +67,24 @@ export const validateAuthData = async (
 };
 
 // Error handling middleware for auth errors
-const handleAuthError = (
+const handleAuthError: ErrorRequestHandler = (
   err: Error,
-  req: Request,
-  res: Response,
+  _req: Request,
+  _res: Response,
   next: NextFunction
 ) => {
-  if (err.name === 'UnauthorizedError') {
-    next(new AuthenticationError('Authentication required'));
+  if (err instanceof AuthenticationError) {
+    next(err);
     return;
   }
-  next(err);
+  next(new AuthenticationError('Authentication required'));
 };
 
 // Combined middleware for authentication flow
-export const authenticate = [
+export const authenticate: Array<RequestHandler | ErrorRequestHandler> = [
   requireAuth,
-  handleAuthError,
-  validateAuthData
+  validateAuthData,
+  handleAuthError
 ];
 
 // Export the individual middleware for flexibility

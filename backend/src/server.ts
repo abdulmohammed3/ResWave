@@ -9,7 +9,8 @@ import { errorHandler } from './middleware/errorHandler';
 import filesRouter from './routes/files';
 import paymentsRouter from './routes/payments';
 import { storage, ollama } from './services';
-import { getServiceStatus, ensureOllamaRunning } from './utils/service-recovery';
+import { HealthMonitor } from './services/healthMonitor';
+import {supabase} from './config/supabase';
 
 export async function createServer() {
   const app = express();
@@ -39,37 +40,21 @@ export async function createServer() {
   // Health check
   app.get('/api/v1/health', async (_, res) => {
     try {
-      const [serviceStatus, storageStatus] = await Promise.all([
-        getServiceStatus(),
-        storage.checkHealth()
-      ]);
-
-      // If Ollama is not running or unhealthy, try to recover
-      if (!serviceStatus.ollama.healthy) {
-        console.log('Attempting to recover Ollama service...');
-        await ensureOllamaRunning();
-        // Get updated status after recovery attempt
-        serviceStatus.ollama = {
-          ...(await getServiceStatus()).ollama
-        };
-      }
-
-      const status = (serviceStatus.ollama.healthy && storageStatus) ? 'healthy' : 'degraded';
+      const healthState = await new HealthMonitor(supabase,ollama).performHealthCheck();
       
       res.json({
         success: true,
-        status,
+        status: healthState.healthy ? 'healthy' : 'degraded',
         services: {
-          ollama: serviceStatus.ollama.status,
-          storage: storageStatus ? 'available' : 'unavailable'
+          database: healthState.database,
+          storage: healthState.storage,
+          model: healthState.model
         },
-        details: {
-          ollama: {
-            running: serviceStatus.ollama.running,
-            healthy: serviceStatus.ollama.healthy
-          }
+        metrics: {
+          queueDepth: healthState.queueDepth,
+          uptime: healthState.uptime
         },
-        timestamp: new Date().toISOString()
+        timestamp: healthState.lastCheck.toISOString()
       });
     } catch (error) {
       console.error('Health check failed:', error);
@@ -138,3 +123,4 @@ export async function startServer() {
 if (require.main === module) {
   startServer();
 }
+
